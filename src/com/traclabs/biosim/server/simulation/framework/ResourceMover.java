@@ -171,6 +171,77 @@ public class ResourceMover extends SimBioModule implements PowerConsumer, Potabl
         }
     }
 
+    /**
+     * O2/N2 inject: if the source tank has a volume, flow is from ΔP, capped
+     * by the hourly desired/max. Tanks without volume keep the hourly mole flow.
+     */
+    private float takePressurizedOrHourly(StoreFlowRateControllable consumer,
+                                          StoreFlowRateControllable producer) {
+        IStore[] sources = consumer.getStores();
+        if (sources == null || sources.length == 0)
+            return 0f;
+        boolean anyTank = false;
+        for (IStore src : sources) {
+            if (src instanceof Store store && store.getTankVolume() > 0f) {
+                anyTank = true;
+                break;
+            }
+        }
+        if (!anyTank)
+            return consumer.getMostResourceFromStoresHourly();
+        float tick = getTickLength();
+        float gathered = 0f;
+        for (int i = 0; i < sources.length; i++) {
+            float hourlyCap = consumer.randomFilter(Math.min(consumer.getMaxFlowRate(i),
+                    consumer.getDesiredFlowRate(i)));
+            float moles;
+            if (sources[i] instanceof Store store && store.getTankVolume() > 0f) {
+                IStore dest = (producer != null && producer.getStores() != null
+                        && i < producer.getStores().length)
+                        ? producer.getStores()[i] : null;
+                if (!pcaAllowsInject(dest, consumer.getDesiredFlowRate(i))) {
+                    moles = 0f;
+                } else {
+                    float pDest = destPressureKpa(producer, i);
+                    float valveCap = consumer.getMaxFlowRate(i);
+                    moles = PressurizedFlow.molesThisTick(store.getTankPressureKpa(), pDest,
+                            valveCap, tick);
+                }
+            } else {
+                moles = hourlyCap * tick;
+            }
+            float taken = sources[i].take(moles);
+            consumer.getActualFlowRates()[i] = taken;
+            gathered += taken;
+        }
+        return gathered;
+    }
+
+    private static boolean pcaAllowsInject(IStore dest, float setpoint) {
+        if (setpoint <= 0f)
+            return false;
+        if (!(dest instanceof EnvironmentStore envStore))
+            return true;
+        SimEnvironment env = envStore.getSimEnvironment();
+        if (dest instanceof EnvironmentO2Store)
+            return PcaLaw.shouldInjectOxygen(env, setpoint);
+        if (dest instanceof EnvironmentNitrogenStore)
+            return PcaLaw.shouldInjectNitrogen(env, setpoint);
+        return true;
+    }
+
+    private static float destPressureKpa(StoreFlowRateControllable producer, int index) {
+        if (producer == null || producer.getStores() == null
+                || index >= producer.getStores().length)
+            return 0f;
+        IStore dest = producer.getStores()[index];
+        if (dest instanceof EnvironmentStore envStore)
+            return envStore.getSimEnvironment().getTotalPressure();
+        if (dest instanceof Store store && store.getTankVolume() > 0f)
+            return store.getTankPressureKpa();
+        return 0f;
+    }
+
     private void getAndPushResources() {
         float powerGathered = myPowerConsumerDefinition
                 .getMostResourceFromStoresHourly();
@@ -203,16 +274,16 @@ public class ResourceMover extends SimBioModule implements PowerConsumer, Potabl
                 .getMostResourceFromStoresHourly();
         myDryWasteProducerDefinition.pushResourceToStores(dryWasteGathered);
 
-        float O2Gathered = myO2ConsumerDefinition
-                .getMostResourceFromStoresHourly();
+        float O2Gathered = takePressurizedOrHourly(myO2ConsumerDefinition,
+                myO2ProducerDefinition);
         myO2ProducerDefinition.pushResourceToStores(O2Gathered);
 
         float CO2Gathered = myCO2ConsumerDefinition
                 .getMostResourceFromStoresHourly();
         myCO2ProducerDefinition.pushResourceToStores(CO2Gathered);
 
-        float nitrogenGathered = myNitrogenConsumerDefinition
-                .getMostResourceFromStoresHourly();
+        float nitrogenGathered = takePressurizedOrHourly(myNitrogenConsumerDefinition,
+                myNitrogenProducerDefinition);
         myNitrogenProducerDefinition.pushResourceToStores(nitrogenGathered);
 
         float H2Gathered = myH2ConsumerDefinition

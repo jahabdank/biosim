@@ -28,11 +28,14 @@ public class AirProducerDefinition extends EnvironmentFlowRateControllable {
             return;
         float actualFlowrateToEnvironment = 0f;
         SimEnvironment environment = getEnvironments()[indexOfEnvironment];
+        float molesBefore = environment.getTotalMoles();
         actualFlowrateToEnvironment += environment.getO2Store().add(airToPush.o2Moles);
         actualFlowrateToEnvironment += environment.getCO2Store().add(airToPush.co2Moles);
         actualFlowrateToEnvironment += environment.getOtherStore().add(airToPush.otherMoles);
         actualFlowrateToEnvironment += environment.getVaporStore().add(airToPush.vaporMoles);
         actualFlowrateToEnvironment += environment.getNitrogenStore().add(airToPush.nitrogenMoles);
+        environment.mixIncomingAir(molesBefore, calculateTotalAirMoles(airToPush),
+                airToPush.temperatureC);
         setActualFlowRate(actualFlowrateToEnvironment, indexOfEnvironment);
     }
 }

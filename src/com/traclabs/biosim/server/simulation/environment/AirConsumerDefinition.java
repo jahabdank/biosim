@@ -46,7 +46,10 @@ public class AirConsumerDefinition extends EnvironmentFlowRateControllable {
         if (getEnvironments().length < indexOfEnvironment)
             return new Air();
 
-        float airMolesToTakeFirst = Math.min(getMaxFlowRate(indexOfEnvironment), getDesiredFlowRate(indexOfEnvironment));
+        // XML desired/max are per hour. Cap this tick at hourly * tickLength.
+        float tick = getModule() != null ? getModule().getTickLength() : 1f;
+        float airMolesToTakeFirst = Math.min(getMaxFlowRate(indexOfEnvironment),
+                getDesiredFlowRate(indexOfEnvironment)) * tick;
         float airMolesToTakeFinal = Math.min(airMolesToTakeFirst, pMolesOfAir);
         if (airMolesToTakeFinal <= 0) {
             setActualFlowRate(0, indexOfEnvironment);
@@ -73,6 +76,7 @@ public class AirConsumerDefinition extends EnvironmentFlowRateControllable {
         actualFlowrateToEnvironment += airTaken.otherMoles = environment.getOtherStore().take(othermolesToTake);
         actualFlowrateToEnvironment += airTaken.vaporMoles = environment.getVaporStore().take(vapormolesToTake);
         actualFlowrateToEnvironment += airTaken.nitrogenMoles = environment.getNitrogenStore().take(nitrogenmolesToTake);
+        airTaken.temperatureC = environment.getTemperature();
         setActualFlowRate(actualFlowrateToEnvironment, indexOfEnvironment);
         return airTaken;
     }
@@ -90,6 +94,7 @@ public class AirConsumerDefinition extends EnvironmentFlowRateControllable {
             molesTakenForThisFlowrate += airToReturn.otherMoles += takeGasFromAir(airMolesToTake, environment.getOtherStore(), environment);
             molesTakenForThisFlowrate += airToReturn.vaporMoles += takeGasFromAir(airMolesToTake, environment.getVaporStore(), environment);
             molesTakenForThisFlowrate += airToReturn.nitrogenMoles += takeGasFromAir(airMolesToTake, environment.getNitrogenStore(), environment);
+            airToReturn.temperatureC = environment.getTemperature();
             setActualFlowRate(molesTakenForThisFlowrate, i);
         }
         return airToReturn;

@@ -17,8 +17,19 @@ import java.util.Iterator;
 
 public class SimEnvironment extends PassiveModule {
 
-    private final static float temperature = 23f;
-    private final static float idealGasConstant = 8.314f; // J K ^-1 mol -1
+    static final float INITIAL_TEMPERATURE_C = 23f;
+    /** Molar heat capacity at constant volume, J/mol/K. Fixed-V node uses Cv. */
+    static final float CV_J_PER_MOL_K = 20.8f;
+    /**
+     * Structure heat capacity per liter of cabin volume, J/K/L.
+     * Air-only n Cv at 55 kPa is ~8 kJ/K in an 18 m³ room; one person is ~80 W
+     * and would sauna the node in hours. Walls/racks are the rest of the node.
+     */
+    static final float STRUCTURE_J_PER_LITER_K = 150f;
+    static final float RACK_HEAT_WATTS = 0f;
+    private static final float idealGasConstant = 8.314f; // J K ^-1 mol -1, kPa L / mol K
+    private float temperature = INITIAL_TEMPERATURE_C;
+    private float heatJoulesAccumulated = 0f;
     private final EnvironmentO2Store myO2Store = new EnvironmentO2Store(this);
     private final EnvironmentCO2Store myCO2Store = new EnvironmentCO2Store(this);
     private final EnvironmentNitrogenStore myNitrogenStore = new EnvironmentNitrogenStore(this);
@@ -99,8 +110,37 @@ public class SimEnvironment extends PassiveModule {
         super.reset();
         lightIntensity = 0f;
         currentVolume = initialVolume;
+        temperature = INITIAL_TEMPERATURE_C;
+        heatJoulesAccumulated = 0f;
         for (EnvironmentStore store : myEnvironmentStores)
             store.reset();
+    }
+
+    /**
+     * Heat into this volume this tick, joules. Applied in {@link #tick()} as
+     * n Cv dT = Q. Positive warms.
+     */
+    public void addHeatJoules(float joules) {
+        heatJoulesAccumulated += joules;
+    }
+
+    /** Heat in watts this tick. Energy = W * tickLengthHours * 3600. */
+    public void addHeatWatts(float watts) {
+        addHeatJoules(watts * getTickLength() * 3600f);
+    }
+
+    /**
+     * Mix incoming air into the energy node. Call after moles have been added.
+     * molesBefore is total moles just prior to the add.
+     */
+    public void mixIncomingAir(float molesBefore, float incomingMoles, float incomingTemperatureC) {
+        if (incomingMoles <= 0f)
+            return;
+        float molesAfter = getTotalMoles();
+        if (molesAfter <= 0f)
+            return;
+        temperature = (molesBefore * temperature + incomingMoles * incomingTemperatureC)
+                / molesAfter;
     }
 
     /**
@@ -123,7 +163,7 @@ public class SimEnvironment extends PassiveModule {
         return myVaporStore.getPressure() / saturatedVaporPressure;
     }
 
-    //returns temperature in celsius
+    //returns temperature in celsius. One energy node per volume; not a frozen constant.
     public float getTemperature() {
         return temperature;
     }
@@ -255,8 +295,22 @@ public class SimEnvironment extends PassiveModule {
         super.tick();
         for (EnvironmentStore store : myEnvironmentStores)
             store.tick();
+        applyHeat();
         performLeak(permanentLeakRate);
         calculateLightIntensity();
+    }
+
+    private void applyHeat() {
+        addHeatWatts(RACK_HEAT_WATTS);
+        float n = getTotalMoles();
+        float capacity = n * CV_J_PER_MOL_K + currentVolume * STRUCTURE_J_PER_LITER_K;
+        if (capacity > 1f)
+            temperature += heatJoulesAccumulated / capacity;
+        heatJoulesAccumulated = 0f;
+        if (temperature < -80f)
+            temperature = -80f;
+        if (temperature > 80f)
+            temperature = 80f;
     }
 
     public void log() {

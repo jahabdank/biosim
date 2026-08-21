@@ -9,8 +9,8 @@ import com.traclabs.biosim.server.simulation.water.PotableWaterProducer;
 import com.traclabs.biosim.server.simulation.water.PotableWaterProducerDefinition;
 
 public class CRS extends SimBioModule implements PowerConsumer, PotableWaterProducer, CO2Consumer, H2Consumer, MethaneProducer {
-    //multiply times power to determine how much air/H2/water we're consuming
-    private static final float LINEAR_MULTIPLICATIVE_FACTOR = 0.02777777777777778f;
+    /** Conversion of the stoichiometric min (CO2 + 4 H2). Not a W/36 CO2 demand. */
+    static final float CONVERSION_ETA = 0.85f;
     //Consumers, Producers
     private final PowerConsumerDefinition myPowerConsumerDefinition;
     private final PotableWaterProducerDefinition myPotableWaterProducerDefinition;
@@ -74,39 +74,47 @@ public class CRS extends SimBioModule implements PowerConsumer, PotableWaterProd
         pushWaterAndMethane();
     }
 
+    static float convertedMoles(float co2Moles, float h2Moles) {
+        if (co2Moles <= 0f || h2Moles <= 0f)
+            return 0f;
+        return CONVERSION_ETA * Math.min(co2Moles, h2Moles / 4f);
+    }
+
     private void gatherH2andCO2() {
-        float CO2Needed = currentPowerConsumed * LINEAR_MULTIPLICATIVE_FACTOR * getTickLength();
-        float H2Needed = CO2Needed * 4f;
-        currentCO2Consumed = myCO2ConsumerDefinition
-                .getResourceFromStores(CO2Needed);
-        currentH2Consumed = myH2ConsumerDefinition
-                .getResourceFromStores(H2Needed);
+        if (currentPowerConsumed <= 0f) {
+            currentCO2Consumed = 0f;
+            currentH2Consumed = 0f;
+            return;
+        }
+        float tick = getTickLength();
+        float co2Cap = 0f;
+        float h2Cap = 0f;
+        if (myCO2ConsumerDefinition.getDesiredFlowRates().length > 0)
+            co2Cap = Math.min(myCO2ConsumerDefinition.getMaxFlowRate(0),
+                    myCO2ConsumerDefinition.getDesiredFlowRate(0)) * tick;
+        if (myH2ConsumerDefinition.getDesiredFlowRates().length > 0)
+            h2Cap = Math.min(myH2ConsumerDefinition.getMaxFlowRate(0),
+                    myH2ConsumerDefinition.getDesiredFlowRate(0)) * tick;
+        currentCO2Consumed = myCO2ConsumerDefinition.getResourceFromStores(co2Cap);
+        currentH2Consumed = myH2ConsumerDefinition.getResourceFromStores(h2Cap);
     }
 
     private void pushWaterAndMethane() {
-        if ((currentH2Consumed <= 0) || (currentCO2Consumed <= 0)) {
+        if ((currentH2Consumed <= 0) || (currentCO2Consumed <= 0)
+                || currentPowerConsumed <= 0f) {
             currentH2OProduced = 0f;
             currentCH4Produced = 0f;
             myH2ConsumerDefinition.pushResourceToStores(currentH2Consumed);
             myCO2ConsumerDefinition.pushResourceToStores(currentCO2Consumed);
         } else {
-            // CO2 + 4H2 --> CH4 + 2H20
-            float limitingReactant = Math.min(currentH2Consumed / 4f,
-                    currentCO2Consumed);
-            if (limitingReactant == currentH2Consumed)
-                myCO2ConsumerDefinition
-                        .pushResourceToStores(currentCO2Consumed
-                                - limitingReactant);
-            else
-                myH2ConsumerDefinition
-                        .pushResourceToStores(currentH2Consumed - 4f
-                                * limitingReactant);
-            float waterMolesProduced = 2f * limitingReactant;
-            float waterLitersProduced = (waterMolesProduced * 18.01524f) / 1000f; //1000g/liter,
-            // 18.01524g/mole
-            float methaneMolesProduced = limitingReactant;
+            // CO2 + 4 H2 → CH4 + 2 H2O
+            float converted = convertedMoles(currentCO2Consumed, currentH2Consumed);
+            myCO2ConsumerDefinition.pushResourceToStores(currentCO2Consumed - converted);
+            myH2ConsumerDefinition.pushResourceToStores(currentH2Consumed - 4f * converted);
+            float waterMolesProduced = 2f * converted;
+            float waterLitersProduced = (waterMolesProduced * 18.01524f) / 1000f;
             currentH2OProduced = waterLitersProduced;
-            currentCH4Produced = methaneMolesProduced;
+            currentCH4Produced = converted;
         }
         myPotableWaterProducerDefinition
                 .pushResourceToStores(currentH2OProduced);

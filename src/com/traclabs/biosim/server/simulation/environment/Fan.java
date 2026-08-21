@@ -54,43 +54,66 @@ public class Fan extends SimBioModule implements AirConsumer, PowerConsumer, Air
     }
 
     private void getAndPushAir() {
-        currentPowerConsumed = myPowerConsumerDefinition.getMostResourceFromStores();
-        currentMolesOfAirConsumed = calculateAirToConsume(currentPowerConsumed);
+        float uCmd = commandedDamper();
+        float wattsNeed = wattsForDamper(uCmd);
+        currentPowerConsumed = myPowerConsumerDefinition.takeAmount(wattsNeed);
+        float uEff = uCmd;
+        if (wattsNeed > 0f && currentPowerConsumed + 1e-6f < wattsNeed)
+            uEff = (float) Math.cbrt(Math.max(0f, currentPowerConsumed / W_DES_WATTS));
+        currentMolesOfAirConsumed = calculateAirToConsume(uEff);
         currentAirConsumed = myAirConsumerDefinition.getAirFromEnvironment(currentMolesOfAirConsumed, 0);
         myAirProducerDefinition.pushAirToEnvironment(currentAirConsumed, 0);
     }
 
     /**
-     * Air moved this tick from the source environment's P and T.
-     * XML flow rates are per hour; moles this tick = (Q * P / (R T)) * tickLength.
-     * Q scales linearly with commanded power: Q = Q_ref * (W / W_ref).
-     * Zero watts moves no air. Power remains the command (not RPM).
-     *
-     * W_ref = 50 W, Q_ref = 36000 L/h. At 55 kPa / 23 °C that is about 804 mol/h.
-     * The old watts*4 rule ignored P, T, and tickLength, so a one-minute tick
-     * moved a full hour of air.
+     * Command is damper u in [0,1] on the power port (desiredFlowRate).
+     * Power drawn is W_des * u^3 (fan affinity). Air: n = (u Q_des) P/(R T) * tickLength.
+     * Q_des = 108000 L/h ≈ 10 min mixing in 18 m³ at 55 kPa / 23 C (~2410 mol/h).
+     * W_des = 120 W. Zero damper moves no air and takes no power.
      */
-    static final float W_REF_WATTS = 50f;
-    static final float Q_REF_LITERS_PER_HOUR = 36000f;
+    static final float W_DES_WATTS = 120f;
+    static final float Q_DES_LITERS_PER_HOUR = 108000f;
     private static final float R_KPA_LITERS = 8.314f;
 
-    static float molesThisTick(float powerWatts, float pressureKpa,
+    static float clampDamper(float commanded) {
+        if (commanded <= 0f)
+            return 0f;
+        if (commanded >= 1f)
+            return 1f;
+        return commanded;
+    }
+
+    static float wattsForDamper(float u) {
+        if (u <= 0f)
+            return 0f;
+        float x = clampDamper(u);
+        return W_DES_WATTS * x * x * x;
+    }
+
+    static float molesThisTick(float damper, float pressureKpa,
                                float temperatureKelvin, float tickLengthHours) {
-        if (powerWatts <= 0f || pressureKpa <= 0f || temperatureKelvin <= 0f
+        float u = clampDamper(damper);
+        if (u <= 0f || pressureKpa <= 0f || temperatureKelvin <= 0f
                 || tickLengthHours <= 0f)
             return 0f;
-        float qLitersPerHour = Q_REF_LITERS_PER_HOUR * (powerWatts / W_REF_WATTS);
+        float qLitersPerHour = Q_DES_LITERS_PER_HOUR * u;
         float molesPerHour = qLitersPerHour * pressureKpa
                 / (R_KPA_LITERS * temperatureKelvin);
         return molesPerHour * tickLengthHours;
     }
 
-    private float calculateAirToConsume(float powerReceived) {
+    private float commandedDamper() {
+        if (myPowerConsumerDefinition.getDesiredFlowRates().length < 1)
+            return 0f;
+        return clampDamper(myPowerConsumerDefinition.getDesiredFlowRate(0));
+    }
+
+    private float calculateAirToConsume(float damper) {
         SimEnvironment[] sources = myAirConsumerDefinition.getEnvironments();
         if (sources == null || sources.length < 1 || sources[0] == null)
             return 0f;
         SimEnvironment src = sources[0];
-        return molesThisTick(powerReceived, src.getTotalPressure(),
+        return molesThisTick(damper, src.getTotalPressure(),
                 src.getTemperatureInKelvin(), getTickLength());
     }
 

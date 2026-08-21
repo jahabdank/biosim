@@ -125,10 +125,30 @@ public abstract class StoreFlowRateControllable extends
     }
 
     /**
-     * Grabs as much resources as it can (i.e., the maxFlowRate) from stores.
-     *
-     * @return The total amount of resource grabbed from the stores
+     * Take this many units from stores this tick. Respects maxFlowRate as a
+     * safety cap. Does not min with desiredFlowRate (desired may be a
+     * setpoint in other units, e.g. damper or mmHg).
      */
+    public float takeAmount(float amount) {
+        if (getStores() == null || amount <= 0f) {
+            if (getActualFlowRates() != null)
+                Arrays.fill(getActualFlowRates(), 0f);
+            return 0f;
+        }
+        float gathered = 0f;
+        for (int i = 0; i < getStores().length && gathered < amount; i++) {
+            float toTake = amount - gathered;
+            float cap = getMaxFlowRate(i);
+            if (cap > 0f)
+                toTake = Math.min(toTake, cap);
+            toTake = randomFilter(toTake);
+            float got = getStores()[i].take(toTake);
+            getActualFlowRates()[i] = got;
+            gathered += got;
+        }
+        return gathered;
+    }
+
     public float getMostResourceFromStores() {
         if (getStores() == null)
             return 0f;

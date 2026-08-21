@@ -90,6 +90,18 @@ public class SimulationInitializer {
         return level;
     }
 
+    private static float getStoreVolume(Node node) {
+        if (node.getAttributes() == null
+                || node.getAttributes().getNamedItem("volume") == null)
+            return 0f;
+        try {
+            return Float.parseFloat(node.getAttributes().getNamedItem("volume")
+                    .getNodeValue());
+        } catch (NumberFormatException e) {
+            return 0f;
+        }
+    }
+
     private static float getStoreCapacity(Node node) {
         float capacity = 0f;
         try {
@@ -619,6 +631,7 @@ public class SimulationInitializer {
     private void setupStore(Store pStore, Node pNode) {
         pStore.setInitialCapacity(getStoreCapacity(pNode));
         pStore.setInitialLevel(getStoreLevel(pNode));
+        pStore.setTankVolume(getStoreVolume(pNode));
         pStore.setResupply(getStoreResupplyFrequency(pNode),
                 getStoreResupplyAmount(pNode));
         BiosimInitializer.setupBioModule(myID, pStore, pNode);

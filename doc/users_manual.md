@@ -280,17 +280,19 @@ REST API.
 
 | Quantity | Unit | Notes |
 |----------|------|-------|
-| Power | watts (W) | `desiredFlowRates`/`level`/`capacity` on power elements |
-| Liquid water (potable, grey, dirty) | liters (L) | per-tick flow rates are liters/tick |
-| Gases (O2, CO2, H2, N2, water vapor, methane) | moles (mol) | environment composition is in moles or partial-pressure % |
+| Power | watts (W) | `desiredFlowRates`/`level`/`capacity` on power elements. Power take is watts this tick, not scaled by `tickLength`. |
+| Liquid water (potable, grey, dirty) | liters (L) | XML `desiredFlowRates`/`maxFlowRates` are **per hour** |
+| Gases (O2, CO2, H2, N2, water vapor, methane) | moles (mol) | XML flow rates are **per hour**. Environment composition is moles or mole fraction. Gas tanks may set `volume` (liters) for P = nRT/V. |
 | Biomass, food, dry waste | kilograms (kg) | |
 | Environment volume | liters (L) | `initialVolume`, `airlockVolume` |
+| Tank volume | liters (L) | optional Store attribute `volume`; used for tank pressure |
 | Time | ticks | each tick represents `tickLength` hours of model time (default `1`) |
 
-Flow rates are expressed **per tick**. Because each tick equals `tickLength` model hours,
-the amount actually moved per tick is scaled by `tickLength` (e.g. `tickLength="0.1"`
-makes each tick a 6-minute step). `driverStutterLength` is unrelated to model time -- it is
-the wall-clock delay (in milliseconds) the driver waits between automatic ticks.
+XML `desiredFlowRates` and `maxFlowRates` on mass ports are **per hour**, not per tick.
+The module multiplies by `tickLength` (hours/tick) to get moles or liters this tick.
+`tickLength="0.016666667"` is a one-minute tick. `driverStutterLength` is unrelated to
+model time -- it is the wall-clock delay (in milliseconds) the driver waits between
+automatic ticks.
 
 ### Global Run-Control Settings
 
@@ -657,24 +659,31 @@ can fail according to a probability distribution. Choose at most one decider; al
 <weibull2FailureDecider lambda="0.001" beta="1.5"/>
 ```
 
-**3. Stochastic (Gaussian) noise.** Add a `<normalStochasticFilter>` to a module to pass
-its outputs through a Gaussian filter, modeling sensor/process noise:
+**3. Stochastic noise.** Two filters exist. Default is none (`NoFilter`).
+
+`<relativeStochasticFilter>` is `N(x, σ·|x|)`: relative σ, one draw per flow, no
+rectification of negatives (resample; if still negative, skip). `sigma="0.01"` is a
+1 % relative error. Zero input stays zero.
+
+```xml
+<relativeStochasticFilter sigma="0.01" isFilterEnabled="true"/>
+```
+
+`<normalStochasticFilter>` is an **absolute** Gaussian with negatives clamped to 0.
+That clamp creates mass when σ is comparable to the value. Prefer the relative filter
+for process noise.
 
 | Attribute | Type | Default | Meaning |
 |-----------|------|---------|---------|
-| `deviation` | double | (required) | Standard deviation of the Gaussian noise. |
+| `deviation` | double | (required) | Absolute standard deviation (`normalStochasticFilter` only). |
+| `sigma` | double | (required) | Relative σ (`relativeStochasticFilter` only). |
 | `isFilterEnabled` | boolean | `true` | Toggle the filter without removing it. |
-
-```xml
-<normalStochasticFilter deviation="0.05"/>
-```
 
 The schema also defines a `stochasticIntensity` attribute on `<Globals>`
 (`HIGH_STOCH` / `MEDIUM_STOCH` / `LOW_STOCH` / `NONE_STOCH`, default `NONE_STOCH`) intended
 as a simulation-wide setting. In the current build, however, noise is applied per module
-through `<normalStochasticFilter>`; the global application path is not active, so prefer
-the per-module filter when you want noise to take effect. A purely deterministic run uses
-no filters (the default).
+through a child filter; the global application path is not active. A purely deterministic
+run uses no filters (the default).
 
 ### Complete Examples
 

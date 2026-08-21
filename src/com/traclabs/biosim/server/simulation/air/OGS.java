@@ -91,42 +91,25 @@ public class OGS extends SimBioModule implements PowerConsumer, PotableWaterCons
         myLogger.debug("power_consumed=" + currentPowerConsumed);
     }
 
-    /**
-     * Faraday O2 from electrolysis. 2 H2O → 2 H2 + O2 (4 e− per mol O2).
-     * Energy per mol O2 at the thermoneutral voltage 1.48 V.
-     * η is voltage efficiency versus that thermoneutral number.
-     */
-    static final float FARADAY_C_PER_MOL = 96485f;
-    static final float THERMONEUTRAL_VOLTS = 1.48f;
-    static final float E_O2_J_PER_MOL = 4f * FARADAY_C_PER_MOL * THERMONEUTRAL_VOLTS;
-    static final float ETA = 0.70f;
-    static final float WATER_G_PER_MOL = 18.01524f;
-
-    static float oxygenMolesFromPower(float watts, float tickLengthHours) {
-        if (watts <= 0f || tickLengthHours <= 0f)
-            return 0f;
-        return ETA * watts * tickLengthHours * 3600f / E_O2_J_PER_MOL;
-    }
-
-    static float litersWaterForOxygenMoles(float o2Moles) {
-        return (2f * o2Moles * WATER_G_PER_MOL) / 1000f;
-    }
-
     private void gatherWater() {
-        float o2FromPower = oxygenMolesFromPower(currentPowerConsumed, getTickLength());
-        float waterToConsume = litersWaterForOxygenMoles(o2FromPower);
+        float waterToConsume = (currentPowerConsumed / 75f) * 0.04167f * getTickLength();
         currentH2OConsumed = myPotableWaterConsumerDefinition
                 .getResourceFromStores(waterToConsume);
     }
 
     private void pushGasses() {
-        // 2 H2O → 2 H2 + O2. Zero potable ⇒ zero O2.
-        float molesOfWater = (currentH2OConsumed * 1000f) / WATER_G_PER_MOL;
-        float o2FromWater = molesOfWater / 2f;
-        float o2FromPower = oxygenMolesFromPower(currentPowerConsumed, getTickLength());
-        currentO2Produced = Math.min(o2FromWater, o2FromPower) * myProductionRate;
-        currentH2Produced = currentO2Produced * 2f;
-        myO2ProducerDefinition.pushResourceToStores(currentO2Produced);
-        myH2ProducerDefinition.pushResourceToStores(currentH2Produced);
+        //2H20 --> 2H2 + O2
+        float molesOfWater = (currentH2OConsumed * 1000f) / 18.01524f; //1000g/liter,
+        // 18.01524g/mole
+        float molesOfReactant = molesOfWater / 2f;
+        currentO2Produced = molesOfReactant * myProductionRate;
+        currentH2Produced = molesOfReactant * 2f
+                * myProductionRate;
+        float O2ToDistrubute = currentO2Produced;
+        float H2ToDistrubute = currentH2Produced;
+        myO2ProducerDefinition
+                .pushResourceToStores(O2ToDistrubute);
+        myH2ProducerDefinition
+                .pushResourceToStores(H2ToDistrubute);
     }
 }

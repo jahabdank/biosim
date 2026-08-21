@@ -172,8 +172,9 @@ public class ResourceMover extends SimBioModule implements PowerConsumer, Potabl
     }
 
     /**
-     * O2/N2 inject: if the source tank has a volume, flow is from ΔP, capped
-     * by the hourly desired/max. Tanks without volume keep the hourly mole flow.
+     * If the source tank has XML volume, flow is from ΔP capped by hourly
+     * desired/max. No volume = hourly mole flow. PCA setpoint gating only
+     * when this injector has control="PCA".
      */
     private float takePressurizedOrHourly(StoreFlowRateControllable consumer,
                                           StoreFlowRateControllable producer) {
@@ -189,6 +190,7 @@ public class ResourceMover extends SimBioModule implements PowerConsumer, Potabl
         }
         if (!anyTank)
             return consumer.getMostResourceFromStoresHourly();
+        boolean pca = this instanceof Injector injector && injector.isPca();
         float tick = getTickLength();
         float gathered = 0f;
         for (int i = 0; i < sources.length; i++) {
@@ -199,11 +201,11 @@ public class ResourceMover extends SimBioModule implements PowerConsumer, Potabl
                 IStore dest = (producer != null && producer.getStores() != null
                         && i < producer.getStores().length)
                         ? producer.getStores()[i] : null;
-                if (!pcaAllowsInject(dest, consumer.getDesiredFlowRate(i))) {
+                if (pca && !pcaAllowsInject(dest, consumer.getDesiredFlowRate(i))) {
                     moles = 0f;
                 } else {
                     float pDest = destPressureKpa(producer, i);
-                    float valveCap = consumer.getMaxFlowRate(i);
+                    float valveCap = pca ? consumer.getMaxFlowRate(i) : hourlyCap;
                     moles = PressurizedFlow.molesThisTick(store.getTankPressureKpa(), pDest,
                             valveCap, tick);
                 }

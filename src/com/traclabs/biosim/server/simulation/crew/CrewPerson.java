@@ -36,9 +36,6 @@ public class CrewPerson extends BaseCrewPerson {
     private static final float LEISURE_RECOVERY_RATE = 90f;
     private static final float AWAKE_TILL_EXHAUSTION = 120;
     private static final float SLEEP_RECOVERY_RATE = 120f;
-    static final float RESTING_O2_MOL_PER_HOUR = 0.4f;
-    /** Metabolic heat from O2 consumed, J/mol. */
-    static final float JOULES_PER_MOL_O2 = 450000f;
     // Used to format floats
     private final DecimalFormat numFormat;
     private final Random myRandomGen = new MersenneTwister();
@@ -376,11 +373,6 @@ public class CrewPerson extends BaseCrewPerson {
         float resultInMoles = resultInLiters / moleOfAirPerLiterAtSTP; // moles
         // per
         // hour
-        // Goudarzi at intensity 0 uses HR=15 and yields ~0.015 mol/h, which is
-        // anaerobic. Floor sleep/rest so O2 use is not off. 0.4 mol/h is a
-        // rest-rate floor (real basal is higher); do not rewrite the polynomial.
-        if (resultInMoles < RESTING_O2_MOL_PER_HOUR)
-            resultInMoles = RESTING_O2_MOL_PER_HOUR;
         float adjustForTickLength = resultInMoles
                 * getCurrentCrewGroup().getTickLength();
         myLogger.debug("resultInMoles " + resultInMoles);
@@ -786,8 +778,8 @@ public class CrewPerson extends BaseCrewPerson {
             O2Consumed = 0f;
         } else {
             O2Consumed = myAirInputs[0].getO2Store().take(O2Needed);
-            if (O2Consumed > 0f)
-                myAirInputs[0].addHeatJoules(O2Consumed * JOULES_PER_MOL_O2);
+            if (O2Consumed > 0f && myAirInputs[0].isOneNodeThermal())
+                myAirInputs[0].addHeatJoules(O2Consumed * 450000f);
         }
 
         // produce from *consumed*, not need (empty tank must not exhale CO₂)

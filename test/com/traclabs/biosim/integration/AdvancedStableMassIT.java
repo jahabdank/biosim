@@ -3,7 +3,6 @@ package com.traclabs.biosim.integration;
 import com.traclabs.biosim.server.framework.BioDriver;
 import com.traclabs.biosim.server.framework.BiosimInitializer;
 import com.traclabs.biosim.server.framework.IBioModule;
-import com.traclabs.biosim.server.simulation.air.VCCRLinear;
 import com.traclabs.biosim.server.simulation.environment.SimEnvironment;
 import com.traclabs.biosim.server.simulation.framework.Store;
 import com.traclabs.biosim.server.util.massvalidation.MassConstants;
@@ -48,7 +47,7 @@ public class AdvancedStableMassIT {
         MassLedger ledger = new MassLedger(out.resolve("ledger.csv"), out.resolve("summary.json"));
         ledger.setScenario("advanced_stable_24h");
         ledger.setTickLengthHours(driver.getTickLength());
-        ledger.addNote("VCCRLinear bed inventory is a compartment (CO2 not yet in CO2_Store).");
+        ledger.addNote("VCCRLangmuir bed inventory is a compartment (CO2 not yet in CO2_Store).");
         ledger.addNote("EVA start/end dumps a fraction of cabin air; that mass is not recovered.");
 
         for (IBioModule module : driver.getModules()) {
@@ -64,7 +63,7 @@ public class AdvancedStableMassIT {
                         () -> env.getVaporStore().getCurrentLevel() * MassConstants.M_H2O_KG_PER_MOL);
                 ledger.addCompartment(name + ".other",
                         () -> env.getOtherStore().getCurrentLevel() * MassConstants.M_AR_KG_PER_MOL);
-            } else if (module instanceof VCCRLinear vccr) {
+            } else if (module instanceof com.traclabs.biosim.server.simulation.air.VCCRLangmuir vccr) {
                 ledger.addCompartment(vccr.getModuleName() + ".bed",
                         () -> vccr.getBedInventoryMoles() * MassConstants.M_CO2_KG_PER_MOL);
             } else if (module instanceof Store store) {

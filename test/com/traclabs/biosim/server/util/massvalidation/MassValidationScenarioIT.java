@@ -19,10 +19,7 @@ class MassValidationScenarioIT {
     void massConservationHolds() throws Exception {
         MassLedger ledger = MassValidationScenario.runScenario(
                 XML_PATH, N_TICKS, Path.of("target/mass-validation"), Map.of());
-        // Resting O2 floor (0.4 mol/h vs Goudarzi ~0.015 at intensity 0)
-        // plus the cabin energy node. 1e-2 kg was float-only; 3e-2 kg is
-        // that named physiology, not an unbounded leak.
-        MassLedger.ValidationResult result = ledger.validate(0.03);
+        MassLedger.ValidationResult result = ledger.validate(MassConstants.TOL_ABS_KG);
 
         assertTrue(Files.exists(ledger.getCsvPath()));
         assertTrue(Files.exists(ledger.getSummaryPath()));

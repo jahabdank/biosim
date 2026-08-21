@@ -18,17 +18,11 @@ import java.util.Iterator;
 public class SimEnvironment extends PassiveModule {
 
     static final float INITIAL_TEMPERATURE_C = 23f;
-    /** Molar heat capacity at constant volume, J/mol/K. Fixed-V node uses Cv. */
     static final float CV_J_PER_MOL_K = 20.8f;
-    /**
-     * Structure heat capacity per liter of cabin volume, J/K/L.
-     * Air-only n Cv at 55 kPa is ~8 kJ/K in an 18 m³ room; one person is ~80 W
-     * and would sauna the node in hours. Walls/racks are the rest of the node.
-     */
     static final float STRUCTURE_J_PER_LITER_K = 150f;
-    static final float RACK_HEAT_WATTS = 0f;
-    private static final float idealGasConstant = 8.314f; // J K ^-1 mol -1, kPa L / mol K
+    private static final float idealGasConstant = 8.314f; // kPa L / mol K
     private float temperature = INITIAL_TEMPERATURE_C;
+    private boolean oneNodeThermal = false;
     private float heatJoulesAccumulated = 0f;
     private final EnvironmentO2Store myO2Store = new EnvironmentO2Store(this);
     private final EnvironmentCO2Store myCO2Store = new EnvironmentCO2Store(this);
@@ -116,25 +110,25 @@ public class SimEnvironment extends PassiveModule {
             store.reset();
     }
 
-    /**
-     * Heat into this volume this tick, joules. Applied in {@link #tick()} as
-     * n Cv dT = Q. Positive warms.
-     */
-    public void addHeatJoules(float joules) {
-        heatJoulesAccumulated += joules;
+    public void setOneNodeThermal(boolean enabled) {
+        oneNodeThermal = enabled;
     }
 
-    /** Heat in watts this tick. Energy = W * tickLengthHours * 3600. */
+    public boolean isOneNodeThermal() {
+        return oneNodeThermal;
+    }
+
+    public void addHeatJoules(float joules) {
+        if (oneNodeThermal)
+            heatJoulesAccumulated += joules;
+    }
+
     public void addHeatWatts(float watts) {
         addHeatJoules(watts * getTickLength() * 3600f);
     }
 
-    /**
-     * Mix incoming air into the energy node. Call after moles have been added.
-     * molesBefore is total moles just prior to the add.
-     */
     public void mixIncomingAir(float molesBefore, float incomingMoles, float incomingTemperatureC) {
-        if (incomingMoles <= 0f)
+        if (!oneNodeThermal || incomingMoles <= 0f)
             return;
         float molesAfter = getTotalMoles();
         if (molesAfter <= 0f)
@@ -163,7 +157,7 @@ public class SimEnvironment extends PassiveModule {
         return myVaporStore.getPressure() / saturatedVaporPressure;
     }
 
-    //returns temperature in celsius. One energy node per volume; not a frozen constant.
+    //returns temperature in celsius
     public float getTemperature() {
         return temperature;
     }
@@ -301,7 +295,10 @@ public class SimEnvironment extends PassiveModule {
     }
 
     private void applyHeat() {
-        addHeatWatts(RACK_HEAT_WATTS);
+        if (!oneNodeThermal) {
+            heatJoulesAccumulated = 0f;
+            return;
+        }
         float n = getTotalMoles();
         float capacity = n * CV_J_PER_MOL_K + currentVolume * STRUCTURE_J_PER_LITER_K;
         if (capacity > 1f)

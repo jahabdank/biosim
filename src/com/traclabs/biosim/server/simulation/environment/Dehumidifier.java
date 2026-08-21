@@ -4,8 +4,6 @@ import com.traclabs.biosim.server.framework.Malfunction;
 import com.traclabs.biosim.server.framework.MalfunctionIntensity;
 import com.traclabs.biosim.server.framework.MalfunctionLength;
 import com.traclabs.biosim.server.simulation.framework.SimBioModule;
-import com.traclabs.biosim.server.simulation.environment.SimEnvironment;
-import com.traclabs.biosim.server.simulation.environment.AirConsumerDefinition;
 import com.traclabs.biosim.server.simulation.water.DirtyWaterProducer;
 import com.traclabs.biosim.server.simulation.water.DirtyWaterProducerDefinition;
 
@@ -16,11 +14,10 @@ import com.traclabs.biosim.server.simulation.water.DirtyWaterProducerDefinition;
  */
 public class Dehumidifier extends SimBioModule implements AirConsumer, DirtyWaterProducer {
 
-    /** Condensing HX coil temperature, Celsius. */
+    // Cabin XML holds ~1 % H₂O. 0.52 never condensed. CCAA target ~2 %.
+    public static final float OPTIMAL_MOISTURE_CONCENTRATION = 0.02f;
     public static final float T_HX_C = 10f;
-    /** UA of the lumped CCAA coil, W/K. */
     public static final float UA_W_PER_K = 20f;
-    /** Latent heat of vaporization, J/mol H2O near 10 C. */
     public static final float H_FG_J_PER_MOL = 44100f;
 
     // Consumers, Producers
@@ -40,10 +37,22 @@ public class Dehumidifier extends SimBioModule implements AirConsumer, DirtyWate
         this(0, "Unnamed Dehumidifier");
     }
 
-    /**
-     * Magnus dewpoint, Celsius, from vapor mole fraction and total P in kPa.
-     * Returns a very low number if there is no vapor.
-     */
+    private static float calculateMolesNeededToRemove(SimEnvironment pEnvironment) {
+        float currentWaterMolesInEnvironment = pEnvironment.getVaporStore().getCurrentLevel();
+        float totalMolesInEnvironment = pEnvironment.getTotalMoles();
+        if ((currentWaterMolesInEnvironment / totalMolesInEnvironment) > OPTIMAL_MOISTURE_CONCENTRATION) {
+            float waterMolesAtOptimalConcentration =
+                    ((totalMolesInEnvironment - currentWaterMolesInEnvironment) * OPTIMAL_MOISTURE_CONCENTRATION)
+                    / (1 - OPTIMAL_MOISTURE_CONCENTRATION);
+            return currentWaterMolesInEnvironment - waterMolesAtOptimalConcentration;
+        }
+        return 0f;
+    }
+
+    private static float waterMolesToLiters(float pMoles) {
+        return (pMoles * 18.01524f) / 1000f; // 1000g/liter, 18.01524g/mole
+    }
+
     static float dewPointC(float temperatureC, float yH2O, float totalPressureKpa) {
         if (yH2O <= 0f || totalPressureKpa <= 0f)
             return -100f;
@@ -58,10 +67,6 @@ public class Dehumidifier extends SimBioModule implements AirConsumer, DirtyWate
         return 6.112f * (float) Math.exp(17.62 * temperatureC / (243.12 + temperatureC));
     }
 
-    /**
-     * Vapor moles to remove to reach y_sat at T_hx, limited by UA * (T − T_hx) * dt / h_fg.
-     * Zero when dewpoint is at or below T_hx.
-     */
     static float molesToCondense(float temperatureC, float yH2O, float totalMoles,
                                  float totalPressureKpa, float tickLengthHours, float ua, float efficiency) {
         if (totalMoles <= 0f || yH2O <= 0f || tickLengthHours <= 0f || efficiency <= 0f)
@@ -86,8 +91,27 @@ public class Dehumidifier extends SimBioModule implements AirConsumer, DirtyWate
         return Math.min(excess, Math.max(0f, uaLimit));
     }
 
-    private static float waterMolesToLiters(float pMoles) {
-        return (pMoles * 18.01524f) / 1000f; // 1000g/liter, 18.01524g/mole
+    private float condenseOneNode(SimEnvironment env, int i) {
+        float desiredHourly = myAirConsumerDefinition.getDesiredFlowRate(i) * operationalEfficiency;
+        if (desiredHourly <= 0f) {
+            myAirConsumerDefinition.getActualFlowRates()[i] = 0f;
+            return 0f;
+        }
+        float qHx = UA_W_PER_K * Math.max(0f, env.getTemperature() - T_HX_C) * operationalEfficiency;
+        env.addHeatWatts(-qHx);
+        float total = env.getTotalMoles();
+        float y = total > 0f ? env.getVaporStore().getCurrentLevel() / total : 0f;
+        float molesNeeded = molesToCondense(env.getTemperature(), y, total,
+                env.getTotalPressure(), getTickLength(), UA_W_PER_K, operationalEfficiency);
+        if (molesNeeded <= 0f) {
+            myAirConsumerDefinition.getActualFlowRates()[i] = 0f;
+            return 0f;
+        }
+        float tick = getTickLength();
+        float cap = Math.min(molesNeeded, myAirConsumerDefinition.getMaxFlowRate(i) * tick);
+        float taken = env.getVaporStore().take(Math.min(cap, desiredHourly * tick));
+        myAirConsumerDefinition.getActualFlowRates()[i] = taken;
+        return taken;
     }
 
     public AirConsumerDefinition getAirConsumerDefinition() {
@@ -114,29 +138,21 @@ public class Dehumidifier extends SimBioModule implements AirConsumer, DirtyWate
         float molesOfWaterGathered = 0f;
         for (int i = 0; i < myAirConsumerDefinition.getEnvironments().length; i++) {
             SimEnvironment env = myAirConsumerDefinition.getEnvironments()[i];
-            float desiredHourly = myAirConsumerDefinition.getDesiredFlowRate(i) * operationalEfficiency;
-            if (desiredHourly <= 0f) {
-                myAirConsumerDefinition.getActualFlowRates()[i] = 0f;
+            if (env.isOneNodeThermal()) {
+                molesOfWaterGathered += condenseOneNode(env, i);
                 continue;
             }
-            float qHx = UA_W_PER_K * Math.max(0f, env.getTemperature() - T_HX_C)
-                    * operationalEfficiency;
-            env.addHeatWatts(-qHx);
-            float total = env.getTotalMoles();
-            float y = total > 0f ? env.getVaporStore().getCurrentLevel() / total : 0f;
-            float molesNeededToRemove = molesToCondense(env.getTemperature(), y, total,
-                    env.getTotalPressure(), getTickLength(), UA_W_PER_K, operationalEfficiency);
+            float molesNeededToRemove = calculateMolesNeededToRemove(env);
             if (molesNeededToRemove > 0) {
                 float tick = getTickLength();
-                float resourceToGatherFirst = Math.min(molesNeededToRemove,
-                        myAirConsumerDefinition.getMaxFlowRate(i) * tick);
-                float desired = desiredHourly * tick;
+                float resourceToGatherFirst = Math.min(molesNeededToRemove, myAirConsumerDefinition.getMaxFlowRate(i) * tick);
+                float desired = myAirConsumerDefinition.getDesiredFlowRate(i) * operationalEfficiency * tick;
                 float resourceToGatherFinal = Math.min(resourceToGatherFirst, desired);
-                float taken = env.getVaporStore().take(resourceToGatherFinal);
+
+                float taken = myAirConsumerDefinition.getEnvironments()[i]
+                        .getVaporStore().take(resourceToGatherFinal);
                 myAirConsumerDefinition.getActualFlowRates()[i] = taken;
                 molesOfWaterGathered += taken;
-            } else {
-                myAirConsumerDefinition.getActualFlowRates()[i] = 0f;
             }
         }
 

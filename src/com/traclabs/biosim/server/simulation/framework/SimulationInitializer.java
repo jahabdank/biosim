@@ -90,6 +90,13 @@ public class SimulationInitializer {
         return level;
     }
 
+    private static String optionalAttribute(Node node, String name) {
+        if (node.getAttributes() == null)
+            return null;
+        org.w3c.dom.Node attr = node.getAttributes().getNamedItem(name);
+        return attr == null ? null : attr.getNodeValue();
+    }
+
     private static float getStoreVolume(Node node) {
         if (node.getAttributes() == null
                 || node.getAttributes().getNamedItem("volume") == null)
@@ -653,6 +660,12 @@ public class SimulationInitializer {
             myLogger.debug("created linear VCCR...");
             VCCRLinear myVCCR = new VCCRLinear(myID, moduleName);
             BiosimInitializer.setupBioModule(myID, myVCCR, node);
+        } else if (implementationString.equals("LANGMUIR")) {
+            VCCRLangmuir myVCCR = new VCCRLangmuir(myID, moduleName);
+            String setpoint = optionalAttribute(node, "ppCo2SetpointMmHg");
+            if (setpoint != null)
+                myVCCR.setPpCo2SetpointMmHg(Float.parseFloat(setpoint));
+            BiosimInitializer.setupBioModule(myID, myVCCR, node);
         } else {
             VCCR myVCCR = new VCCR(myID, moduleName);
             BiosimInitializer.setupBioModule(myID, myVCCR, node);
@@ -674,7 +687,9 @@ public class SimulationInitializer {
      */
     private void createCRS(Node node) {
         String moduleName = BiosimInitializer.getModuleName(node);
-        CRS myCRS = new CRS(myID, moduleName);
+        String implementation = optionalAttribute(node, "implementation");
+        SimBioModule myCRS = "CONVERSION".equals(implementation)
+                ? new CRSConversion(myID, moduleName) : new CRS(myID, moduleName);
         BiosimInitializer.setupBioModule(myID, myCRS, node);
     }
 
@@ -682,10 +697,9 @@ public class SimulationInitializer {
      * @param child
      */
     private void configureCRS(Node node) {
-        CRS myCRS = (CRS) BiosimInitializer.getModule(myID, BiosimInitializer.getModuleName(node));
+        SimBioModule myCRS = (SimBioModule) BiosimInitializer.getModule(myID, BiosimInitializer.getModuleName(node));
         configureSimBioModule(myCRS, node);
         myActiveSimModules.add(myCRS);
-
     }
 
     /**
@@ -709,12 +723,14 @@ public class SimulationInitializer {
 
     private void createOGS(Node node) {
         String moduleName = BiosimInitializer.getModuleName(node);
-        OGS ogs = new OGS(myID, moduleName);
+        String implementation = optionalAttribute(node, "implementation");
+        SimBioModule ogs = "FARADAY".equals(implementation)
+                ? new OGSFaraday(myID, moduleName) : new OGS(myID, moduleName);
         BiosimInitializer.setupBioModule(myID, ogs, node);
     }
 
     private void configureOGS(Node node) {
-        OGS ogs = (OGS) BiosimInitializer.getModule(myID, BiosimInitializer.getModuleName(node));
+        SimBioModule ogs = (SimBioModule) BiosimInitializer.getModule(myID, BiosimInitializer.getModuleName(node));
         configureSimBioModule(ogs, node);
         myLogger.debug("Configuring OGS");
         myActiveSimModules.add(ogs);
@@ -977,6 +993,8 @@ public class SimulationInitializer {
         env.setMaxLumens(maxLumens);
         env.setAirlockVolume(airlockVolume);
         env.setDangerousOxygenThreshold(dangerousOxygenThreshold);
+        if ("ONE_NODE".equals(optionalAttribute(node, "thermal")))
+            env.setOneNodeThermal(true);
         BiosimInitializer.setupBioModule(myID, env, node);
     }
 
@@ -1065,12 +1083,13 @@ public class SimulationInitializer {
     private void createFan(Node node) {
         String moduleName = BiosimInitializer.getModuleName(node);
         myLogger.debug("Creating Fan with moduleName: " + moduleName);
-        Fan fan = new Fan(myID, moduleName);
+        SimBioModule fan = "DAMPER".equals(optionalAttribute(node, "command"))
+                ? new FanDamper(myID, moduleName) : new Fan(myID, moduleName);
         BiosimInitializer.setupBioModule(myID, fan, node);
     }
 
     private void configureFan(Node node) {
-        Fan fan = (Fan) BiosimInitializer.getModule(myID, BiosimInitializer.getModuleName(node));
+        SimBioModule fan = (SimBioModule) BiosimInitializer.getModule(myID, BiosimInitializer.getModuleName(node));
         configureSimBioModule(fan, node);
         myPrioritySimModules.add(fan);
     }
@@ -1120,6 +1139,7 @@ public class SimulationInitializer {
     private void createInjector(Node node) {
         String moduleName = BiosimInitializer.getModuleName(node);
         Injector injector = new Injector(myID, moduleName);
+        injector.setPca("PCA".equals(optionalAttribute(node, "control")));
         BiosimInitializer.setupBioModule(myID, injector, node);
     }
 

@@ -149,6 +149,11 @@ public abstract class StoreFlowRateControllable extends
         return gathered;
     }
 
+    /**
+     * Grabs as much resources as it can (i.e., the maxFlowRate) from stores.
+     *
+     * @return The total amount of resource grabbed from the stores
+     */
     public float getMostResourceFromStores() {
         if (getStores() == null)
             return 0f;

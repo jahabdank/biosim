@@ -15,6 +15,7 @@
 		<xsd:restriction base="xsd:string">
 			<xsd:enumeration value="DETAILED"/>
 			<xsd:enumeration value="LINEAR"/>
+			<xsd:enumeration value="LANGMUIR"/>
 		</xsd:restriction>
 	</xsd:simpleType>
 	
@@ -33,6 +34,20 @@
 		</xsd:complexContent>
 	</xsd:complexType>
 	
+	<xsd:simpleType name="OGSImplementationType">
+		<xsd:restriction base="xsd:string">
+			<xsd:enumeration value="LINEAR"/>
+			<xsd:enumeration value="FARADAY"/>
+		</xsd:restriction>
+	</xsd:simpleType>
+
+	<xsd:simpleType name="CRSImplementationType">
+		<xsd:restriction base="xsd:string">
+			<xsd:enumeration value="LINEAR"/>
+			<xsd:enumeration value="CONVERSION"/>
+		</xsd:restriction>
+	</xsd:simpleType>
+
 	<xsd:complexType name="OGSType">  
 		<xsd:complexContent>
 			<xsd:extension base="BioModuleType">
@@ -42,6 +57,7 @@
 					<xsd:element maxOccurs="1" minOccurs="1" name="O2Producer" type="O2ProducerType"/>
 					<xsd:element maxOccurs="1" minOccurs="1" name="H2Producer" type="H2ProducerType"/>
 				</xsd:sequence>
+				<xsd:attribute default="LINEAR" name="implementation" type="OGSImplementationType"/>
 			</xsd:extension>
 		</xsd:complexContent>
 	</xsd:complexType>
@@ -71,6 +87,7 @@
 					<xsd:element maxOccurs="1" minOccurs="1" name="methaneProducer" type="MethaneProducerType"/>
 					
 				</xsd:sequence>
+				<xsd:attribute default="LINEAR" name="implementation" type="CRSImplementationType"/>
 			</xsd:extension>
 		</xsd:complexContent>
 	</xsd:complexType>
@@ -85,6 +102,7 @@
 					<xsd:element maxOccurs="1" minOccurs="1" name="CO2Producer" type="CO2ProducerType"/>
 				</xsd:sequence>
 				<xsd:attribute default="LINEAR" name="implementation" type="VCCRImplementationType"/>
+				<xsd:attribute name="ppCo2SetpointMmHg" type="nonNegativeFloat" use="optional"/>
 			</xsd:extension>
 		</xsd:complexContent>
 	</xsd:complexType>

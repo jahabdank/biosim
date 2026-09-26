@@ -125,6 +125,31 @@ public abstract class StoreFlowRateControllable extends
     }
 
     /**
+     * Take this many units from stores this tick. Respects maxFlowRate as a
+     * safety cap. Does not min with desiredFlowRate (desired may be a
+     * setpoint in other units, e.g. damper or mmHg).
+     */
+    public float takeAmount(float amount) {
+        if (getStores() == null || amount <= 0f) {
+            if (getActualFlowRates() != null)
+                Arrays.fill(getActualFlowRates(), 0f);
+            return 0f;
+        }
+        float gathered = 0f;
+        for (int i = 0; i < getStores().length && gathered < amount; i++) {
+            float toTake = amount - gathered;
+            float cap = getMaxFlowRate(i);
+            if (cap > 0f)
+                toTake = Math.min(toTake, cap);
+            toTake = randomFilter(toTake);
+            float got = getStores()[i].take(toTake);
+            getActualFlowRates()[i] = got;
+            gathered += got;
+        }
+        return gathered;
+    }
+
+    /**
      * Grabs as much resources as it can (i.e., the maxFlowRate) from stores.
      *
      * @return The total amount of resource grabbed from the stores
@@ -137,6 +162,31 @@ public abstract class StoreFlowRateControllable extends
             float amountToTake = Math.min(getMaxFlowRate(i),
                     getDesiredFlowRate(i));
             amountToTake = randomFilter(amountToTake);
+            getActualFlowRates()[i] = getStores()[i].take(amountToTake);
+            gatheredResource += getActualFlowRate(i);
+        }
+        return gatheredResource;
+    }
+
+    /**
+     * Like {@link #getMostResourceFromStores()} but XML desired/max are
+     * per hour. Scale by the module tickLength so a tick shorter than one
+     * hour does not take a full hour of mass.
+     */
+    public float getMostResourceFromStoresHourly() {
+        if (getStores() == null)
+            return 0f;
+        float tick = 1f;
+        if (getModule() != null)
+            tick = getModule().getTickLength();
+        float gatheredResource = 0f;
+        for (int i = 0; i < getStores().length; i++) {
+            // Filter the hourly setpoint, then scale. Filtering after
+            // *tick would apply absolute noise once per tick instead of
+            // once per hour when desired is 0.
+            float hourly = randomFilter(Math.min(getMaxFlowRate(i),
+                    getDesiredFlowRate(i)));
+            float amountToTake = hourly * tick;
             getActualFlowRates()[i] = getStores()[i].take(amountToTake);
             gatheredResource += getActualFlowRate(i);
         }

@@ -185,6 +185,10 @@ public class CrewGroup extends SimBioModule implements FoodConsumer, AirConsumer
         clearActualFlowRates();
         for (CrewPerson currentPerson : crewPeople.values())
             currentPerson.tick();
+    }
+
+    /** Apply queued transfers after all groups have ticked. */
+    public void applyScheduledTransfers() {
         //Add those scheduled
         for (CrewPerson crewPersonToAdd : crewScheduledForAddition)
             crewPeople.put(crewPersonToAdd.getName(), crewPersonToAdd);

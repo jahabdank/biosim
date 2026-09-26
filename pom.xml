@@ -77,8 +77,24 @@
                     <include>**/*</include>
                 </includes>
             </resource>
+            <resource>
+                <directory>${project.basedir}</directory>
+                <targetPath>META-INF/biosim</targetPath>
+                <includes>
+                    <include>LICENSE</include>
+                </includes>
+            </resource>
         </resources>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <configuration>
+                    <overwrite>true</overwrite>
+                </configuration>
+            </plugin>
+
             <!-- Maven Compiler Plugin -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -132,6 +148,19 @@
                 <version>3.6.0</version>
                 <executions>
                     <execution>
+                        <id>preserve-dependency-notices</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>unpack-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeScope>runtime</includeScope>
+                            <includes>**/*LICENSE*,**/*license*,**/*NOTICE*,**/*notice*,**/*COPYRIGHT*,**/*copyright*</includes>
+                            <useSubDirectoryPerArtifact>true</useSubDirectoryPerArtifact>
+                            <outputDirectory>${project.build.outputDirectory}/META-INF/dependency-notices</outputDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>copy-dependencies</id>
                         <phase>package</phase>
                         <goals>
@@ -139,6 +168,7 @@
                         </goals>
                         <configuration>
                             <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                            <includeScope>runtime</includeScope>
                         </configuration>
                     </execution>
                 </executions>

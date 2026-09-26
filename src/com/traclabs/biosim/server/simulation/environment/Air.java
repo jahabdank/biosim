@@ -7,8 +7,14 @@ public final class Air {
     public float otherMoles;
     public float vaporMoles;
     public float nitrogenMoles;
+    /** Celsius of this slug. Default matches SimEnvironment initial T. */
+    public float temperatureC = 23f;
 
     public Air() {
+    }
+
+    public float totalMoles() {
+        return o2Moles + co2Moles + otherMoles + vaporMoles + nitrogenMoles;
     }
 
     public Air(float o2Moles, float co2Moles, float otherMoles, float vaporMoles, float nitrogenMoles) {

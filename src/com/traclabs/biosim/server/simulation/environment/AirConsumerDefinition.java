@@ -46,8 +46,18 @@ public class AirConsumerDefinition extends EnvironmentFlowRateControllable {
         if (getEnvironments().length < indexOfEnvironment)
             return new Air();
 
-        float airMolesToTakeFirst = Math.min(getMaxFlowRate(indexOfEnvironment), getDesiredFlowRate(indexOfEnvironment));
+        // XML desired/max are per hour. Cap this tick at hourly * tickLength.
+        float tick = getModule() != null ? getModule().getTickLength() : 1f;
+        float airMolesToTakeFirst = Math.min(getMaxFlowRate(indexOfEnvironment),
+                getDesiredFlowRate(indexOfEnvironment)) * tick;
         float airMolesToTakeFinal = Math.min(airMolesToTakeFirst, pMolesOfAir);
+        if (airMolesToTakeFinal <= 0) {
+            setActualFlowRate(0, indexOfEnvironment);
+            return new Air();
+        }
+        // One draw on the total, then split by current composition. Per-gas
+        // randomFilter on take *and* push was how NormalFilter created mass.
+        airMolesToTakeFinal = randomFilter(airMolesToTakeFinal);
         if (airMolesToTakeFinal <= 0) {
             setActualFlowRate(0, indexOfEnvironment);
             return new Air();
@@ -61,11 +71,12 @@ public class AirConsumerDefinition extends EnvironmentFlowRateControllable {
         float vapormolesToTake = airMolesToTakeFinal * getGasConcentration(environment, environment.getVaporStore());
         float nitrogenmolesToTake = airMolesToTakeFinal * getGasConcentration(environment, environment.getNitrogenStore());
         Air airTaken = new Air();
-        actualFlowrateToEnvironment += airTaken.o2Moles = environment.getO2Store().take(randomFilter(o2molesToTake));
-        actualFlowrateToEnvironment += airTaken.co2Moles = environment.getCO2Store().take(randomFilter(co2molesToTake));
-        actualFlowrateToEnvironment += airTaken.otherMoles = environment.getOtherStore().take(randomFilter(othermolesToTake));
-        actualFlowrateToEnvironment += airTaken.vaporMoles = environment.getVaporStore().take(randomFilter(vapormolesToTake));
-        actualFlowrateToEnvironment += airTaken.nitrogenMoles = environment.getNitrogenStore().take(randomFilter(nitrogenmolesToTake));
+        actualFlowrateToEnvironment += airTaken.o2Moles = environment.getO2Store().take(o2molesToTake);
+        actualFlowrateToEnvironment += airTaken.co2Moles = environment.getCO2Store().take(co2molesToTake);
+        actualFlowrateToEnvironment += airTaken.otherMoles = environment.getOtherStore().take(othermolesToTake);
+        actualFlowrateToEnvironment += airTaken.vaporMoles = environment.getVaporStore().take(vapormolesToTake);
+        actualFlowrateToEnvironment += airTaken.nitrogenMoles = environment.getNitrogenStore().take(nitrogenmolesToTake);
+        airTaken.temperatureC = environment.getTemperature();
         setActualFlowRate(actualFlowrateToEnvironment, indexOfEnvironment);
         return airTaken;
     }
@@ -74,14 +85,16 @@ public class AirConsumerDefinition extends EnvironmentFlowRateControllable {
         Air airToReturn = new Air();
         for (int i = 0; i < getEnvironments().length; i++) {
             SimEnvironment environment = getEnvironments()[i];
-            float airMolesToTake = Math.min(getMaxFlowRate(i), getDesiredFlowRate(i));
-            airMolesToTake = randomFilter(airMolesToTake);
+            float tick = getModule() != null ? getModule().getTickLength() : 1f;
+            float hourly = randomFilter(Math.min(getMaxFlowRate(i), getDesiredFlowRate(i)));
+            float airMolesToTake = hourly * tick;
             float molesTakenForThisFlowrate = 0f;
             molesTakenForThisFlowrate += airToReturn.o2Moles += takeGasFromAir(airMolesToTake, environment.getO2Store(), environment);
             molesTakenForThisFlowrate += airToReturn.co2Moles += takeGasFromAir(airMolesToTake, environment.getCO2Store(), environment);
             molesTakenForThisFlowrate += airToReturn.otherMoles += takeGasFromAir(airMolesToTake, environment.getOtherStore(), environment);
             molesTakenForThisFlowrate += airToReturn.vaporMoles += takeGasFromAir(airMolesToTake, environment.getVaporStore(), environment);
             molesTakenForThisFlowrate += airToReturn.nitrogenMoles += takeGasFromAir(airMolesToTake, environment.getNitrogenStore(), environment);
+            airToReturn.temperatureC = environment.getTemperature();
             setActualFlowRate(molesTakenForThisFlowrate, i);
         }
         return airToReturn;

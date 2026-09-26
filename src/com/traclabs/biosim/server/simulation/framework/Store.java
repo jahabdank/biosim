@@ -32,6 +32,11 @@ public class Store extends PassiveModule implements IStore {
 
     private float resupplyAmount = 0f;
 
+    /** Tank geometric volume in liters. 0 means this store has no P = nRT/V. */
+    private float tankVolumeLiters = 0f;
+    private static final float TANK_T_KELVIN = 296.15f;
+    private static final float R_KPA_LITERS = 8.314f;
+
     /**
      * Creates a Store with an initial currentLevel and currentCapacity of 0
      *
@@ -94,6 +99,24 @@ public class Store extends PassiveModule implements IStore {
     public void setResupply(int pResupplyFrequency, float pResupplyAmount) {
         resupplyFrequency = pResupplyFrequency;
         resupplyAmount = pResupplyAmount;
+    }
+
+    public void setTankVolume(float liters) {
+        tankVolumeLiters = Math.max(0f, liters);
+    }
+
+    public float getTankVolume() {
+        return tankVolumeLiters;
+    }
+
+    /**
+     * Tank pressure in kPa from P = nRT/V. 0 if no volume is set.
+     * T is 23 C (tanks are not the cabin energy node).
+     */
+    public float getTankPressureKpa() {
+        if (tankVolumeLiters <= 0f)
+            return 0f;
+        return (currentLevel * R_KPA_LITERS * TANK_T_KELVIN) / tankVolumeLiters;
     }
 
     public void tick() {
@@ -212,8 +235,6 @@ public class Store extends PassiveModule implements IStore {
      * @return the amount actually retrieved
      */
     public float take(float amountRequested) {
-        if (pipe)
-            currentCapacity -= amountRequested;
         //idiot check
         if (Float.isNaN(amountRequested)) {
             myLogger
@@ -224,17 +245,17 @@ public class Store extends PassiveModule implements IStore {
         }
         if (amountRequested <= 0)
             return 0f;
-        float takenAmount;
-        //asking for more stuff than exists
-        if (amountRequested > currentLevel) {
-            takenAmount = getStochasticFilter().randomFilter(currentLevel);
+        if (currentLevel < 0f)
             currentLevel = 0f;
-        }
-        //stuff exists for request
-        else {
-            takenAmount = getStochasticFilter().randomFilter(amountRequested);
-            currentLevel -= takenAmount;
-        }
+        float available = currentLevel;
+        float takenAmount = getStochasticFilter().randomFilter(amountRequested);
+        if (takenAmount < 0f)
+            takenAmount = 0f;
+        if (takenAmount > available)
+            takenAmount = available;
+        currentLevel = available - takenAmount;
+        if (pipe)
+            currentCapacity -= takenAmount;
         return takenAmount;
     }
 

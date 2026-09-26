@@ -87,10 +87,12 @@ public class BioDriver {
     /**
      * Starts the simulation
      */
-    public void startSimulation() {
+    public synchronized void startSimulation() {
         reset();
+        simulationStarted = true;
         myTickThread = new Thread(new Ticker(), "Biosim Tick Thread");
         myTickThread.start();
+        notifyAll();
     }
 
     /**
@@ -107,7 +109,7 @@ public class BioDriver {
      *
      * @return <code>true</code> if paused, <code>false</code> if not
      */
-    public boolean isPaused() {
+    public synchronized boolean isPaused() {
         return simulationIsPaused;
     }
 
@@ -116,7 +118,7 @@ public class BioDriver {
      *
      * @return <code>true</code> if started, <code>false</code> if not
      */
-    public boolean isStarted() {
+    public synchronized boolean isStarted() {
         return simulationStarted;
     }
 
@@ -125,7 +127,7 @@ public class BioDriver {
      *
      * @return <code>true</code> if ended, <code>false</code> if not
      */
-    public boolean isEnded() {
+    public synchronized boolean isEnded() {
         return simulationEnded;
     }
 
@@ -298,8 +300,7 @@ public class BioDriver {
 
     public synchronized void setPauseSimulation(boolean pPaused) {
         simulationIsPaused = pPaused;
-        if (!simulationIsPaused)
-            notify();
+        notifyAll();
     }
 
     /**
@@ -332,7 +333,7 @@ public class BioDriver {
      * @return Whether BioDriver is looping the simulation after end conditions
      * have been met.
      */
-    public boolean isLooping() {
+    public synchronized boolean isLooping() {
         return looping;
     }
 
@@ -352,7 +353,7 @@ public class BioDriver {
      *
      * @return Whether the simulation has met an end condition and has stopped.
      */
-    public boolean isDone() {
+    public synchronized boolean isDone() {
         if (runTillN) {
             if (ticksGoneBy >= nTicks) {
                 myLogger.info("BioDriver" + myID
@@ -389,7 +390,7 @@ public class BioDriver {
      *
      * @return The number of times BioDriver has ticked the simulation
      */
-    public int getTicks() {
+    public synchronized int getTicks() {
         return ticksGoneBy;
     }
 
@@ -398,9 +399,9 @@ public class BioDriver {
      */
     public synchronized void endSimulation() {
         myTickThread = null;
-        notify();
         simulationStarted = false;
         simulationEnded = true;
+        notifyAll();
         myLogger.info("BioDriver" + myID + ": simulation ended on tick "
                 + ticksGoneBy);
         if (exitWhenFinished)
@@ -408,16 +409,34 @@ public class BioDriver {
     }
 
     /**
-     * Advances the simulation once tick. NOTICE: not pausing the simulation
-     * before using this method can be very risky. Don't do it.
+     * Pauses automatic execution and advances one tick unless the simulation has ended.
      */
     public synchronized void advanceOneTick() {
+        advanceTicks(1);
+    }
+
+    /**
+     * Advance n ticks while paused. Lets a REST client batch ticks in one
+     * request instead of posting /tick once per tick. Ended simulations do not
+     * advance until reset or restarted; unstarted fixtures may be stepped directly.
+     */
+    public synchronized void advanceTicks(int n) {
+        if (n < 1 || simulationEnded)
+            return;
         if (!simulationIsPaused)
             setPauseSimulation(true);
-        tick();
-        // Check if an end condition has been met after manual tick
         if (isDone()) {
             endSimulation();
+            return;
+        }
+        for (int i = 0; i < n; i++) {
+            tick();
+            if (simulationEnded)
+                return;
+            if (isDone()) {
+                endSimulation();
+                return;
+            }
         }
     }
 
@@ -461,7 +480,7 @@ public class BioDriver {
      * Typically this means resetting the various gas levels, crew people, water
      * levels, etc.
      */
-    public void reset() {
+    public synchronized void reset() {
         myLogger.debug("BioDriver" + myID + ": Resetting simulation");
         ticksGoneBy = 0;
         simulationEnded = false;
@@ -473,48 +492,38 @@ public class BioDriver {
     }
 
     /**
-     * The ticking simulation loop. Uses a variety of semaphores to
-     * pause/resume/end without causing deadlock. Essentially runs till told to
-     * pause or die.
+     * Automatic ticks and lifecycle transitions share the driver monitor.
      */
     private void runSimulation() {
         Thread currentThread = Thread.currentThread();
-        if (!simulationStarted) {
-            reset();
-        }
-        while (myTickThread == currentThread) {
-            // Wait immediately if the simulation is paused to avoid busy waiting
+        while (true) {
             synchronized (this) {
-                while (simulationIsPaused && (myTickThread == currentThread)) {
-                    try {
+                try {
+                    while (simulationIsPaused && myTickThread == currentThread)
                         wait();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return; // exit if the thread is interrupted
+                    // A stop or restart can revoke this worker while it is waiting.
+                    if (myTickThread != currentThread || simulationEnded)
+                        return;
+
+                    tick();
+                    // Callbacks may stop or restart the simulation during the tick.
+                    if (myTickThread != currentThread || simulationEnded)
+                        return;
+                    if (isDone()) {
+                        myLogger.info("🎬 Simulation ended after " + getTicksInHumanReadableFormat());
+                        endSimulation();
+                        if (looping)
+                            startSimulation();
+                        return;
                     }
+
+                    // Release the monitor while throttled so pause/end can wake the worker.
+                    if (myDriverStutterLength > 0)
+                        wait(myDriverStutterLength);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
                 }
-            }
-
-            // Perform the simulation tick once resumed
-            tick();
-
-            // Check if an end condition has been met
-            if (isDone()) {
-                myLogger.info("🎬 Simulation ended after " + getTicksInHumanReadableFormat());
-                endSimulation();
-                if (looping) {
-                    startSimulation();
-                } else {
-                    break;
-                }
-            }
-
-            // Pause between ticks to throttle simulation speed
-            try {
-                Thread.sleep(myDriverStutterLength);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
             }
         }
     }
@@ -541,6 +550,11 @@ public class BioDriver {
         // Iterate through the priority sim modules and tick them
         for (IBioModule currentBioModule : prioritySimModules)
             currentBioModule.tick();
+        // Commit transfers together so roster membership cannot depend on group order.
+        for (IBioModule currentBioModule : modules) {
+            if (currentBioModule instanceof CrewGroup crewGroup)
+                crewGroup.applyScheduledTransfers();
+        }
         // Iterate through the sensors and tick them
         for (IBioModule currentBioModule : sensors)
             currentBioModule.tick();
@@ -597,12 +611,10 @@ public class BioDriver {
     private class Ticker implements Runnable {
         /**
          * Invoked by the myTickThread.start() method call and necessary to
-         * implement Runnable. Sets flag that simulation is running, initializes
-         * servers (if applicable), then begins ticking them.
+         * implement Runnable. Lifecycle state is established before this worker starts.
          */
         public void run() {
             myLogger.debug("BioDriver" + myID + ": Running simulation...");
-            simulationStarted = true;
             runSimulation();
         }
     }

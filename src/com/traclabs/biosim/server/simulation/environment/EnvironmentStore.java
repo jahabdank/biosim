@@ -14,6 +14,10 @@ public class EnvironmentStore extends Store {
         mySimEnvironment = pSimEnvironment;
     }
 
+    public SimEnvironment getSimEnvironment() {
+        return mySimEnvironment;
+    }
+
     public float getPressure() {
         return calculatePressure(getCurrentLevel());
     }

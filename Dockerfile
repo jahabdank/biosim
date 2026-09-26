@@ -1,27 +1,19 @@
-# Use a Java 21 base image
-FROM eclipse-temurin:21-jdk
+FROM maven:3.9.9-eclipse-temurin-21 AS build
+WORKDIR /build
+COPY pom.xml LICENSE ./
+COPY src/ src/
+COPY test/ test/
+COPY etc/ etc/
+COPY configuration/ configuration/
+RUN mvn -B clean verify
 
-# Set the working directory
+FROM eclipse-temurin:21-jre
 WORKDIR /app
-
-# Copy the Maven project files
-COPY pom.xml .
-COPY src/ ./src/
-COPY etc/ ./etc/
-COPY bin/ ./bin/
-
-# Install Maven and build the project
-RUN apt-get update && apt-get install -y maven
-RUN mvn clean package
-
-# Make the scripts in bin executable
-RUN chmod +x bin/*
-
-# Create logs directory for tick logging
-RUN mkdir -p /app/logs
-
-# Expose the port for the REST API
+COPY --from=build /build/target/biosim-2.0.0.jar target/
+COPY --from=build /build/target/lib/ target/lib/
+COPY configuration/ configuration/
+COPY LICENSE ./
+RUN mkdir logs && chown 10001:10001 logs
+USER 10001:10001
 EXPOSE 8009
-
-# Run the BioSim server using the start script
-CMD ["./bin/start-biosim-server"]
+ENTRYPOINT ["java", "-jar", "target/biosim-2.0.0.jar"]

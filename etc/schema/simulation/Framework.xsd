@@ -8,6 +8,7 @@
 			<xsd:extension base="BioModuleType">
 					<xsd:attribute name="capacity" type="nonNegativeFloat" use="required"/>
 					<xsd:attribute name="level" type="nonNegativeFloat" use="required"/>
+					<xsd:attribute name="volume" type="nonNegativeFloat" use="optional"/>
 					<xsd:attribute name="resupplyFrequency" type="xsd:nonNegativeInteger" default="0"/>
 					<xsd:attribute name="resupplyAmount" type="nonNegativeFloat" default="0"/>
 			</xsd:extension>
@@ -78,6 +79,7 @@
 					<xsd:element name="dryWasteConsumer" type="DryWasteConsumerType" minOccurs="0" maxOccurs="1"/>
 					<xsd:element name="dryWasteProducer" type="DryWasteProducerType" minOccurs="0" maxOccurs="1"/>
 			</xsd:sequence>
+			<xsd:attribute name="control" type="xsd:string" use="optional"/>
 			</xsd:extension>
 		</xsd:complexContent>
 	</xsd:complexType>

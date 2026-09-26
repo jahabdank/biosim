@@ -280,17 +280,22 @@ REST API.
 
 | Quantity | Unit | Notes |
 |----------|------|-------|
-| Power | watts (W) | `desiredFlowRates`/`level`/`capacity` on power elements |
-| Liquid water (potable, grey, dirty) | liters (L) | per-tick flow rates are liters/tick |
-| Gases (O2, CO2, H2, N2, water vapor, methane) | moles (mol) | environment composition is in moles or partial-pressure % |
+| Power | watts (W) | `desiredFlowRates`/`level`/`capacity` on power elements. Equipment power commands are watts this tick; the generic resource mover also scales power transfers by `tickLength`. |
+| Liquid water (potable, grey, dirty) | liters (L) | XML `desiredFlowRates`/`maxFlowRates` are **per hour** |
+| Gases (O2, CO2, H2, N2, water vapor, methane) | moles (mol) | XML flow rates are **per hour**. Environment composition is moles or mole fraction. Gas tanks may set `volume` (liters) for P = nRT/V. |
 | Biomass, food, dry waste | kilograms (kg) | |
 | Environment volume | liters (L) | `initialVolume`, `airlockVolume` |
+| Tank volume | liters (L) | optional Store attribute `volume`; used for tank pressure |
 | Time | ticks | each tick represents `tickLength` hours of model time (default `1`) |
 
-Flow rates are expressed **per tick**. Because each tick equals `tickLength` model hours,
-the amount actually moved per tick is scaled by `tickLength` (e.g. `tickLength="0.1"`
-makes each tick a 6-minute step). `driverStutterLength` is unrelated to model time -- it is
-the wall-clock delay (in milliseconds) the driver waits between automatic ticks.
+XML `desiredFlowRates` and `maxFlowRates` on mass ports are **per hour**, not per tick.
+The updated fan, air consumer, resource-mover, dehumidifier, and conversion paths
+scale by `tickLength` (hours/tick). This is not a claim of timestep invariance for
+every legacy subsystem. The opt-in damper and PCA controls use setpoints rather
+than mass rates, as described below.
+`tickLength="0.016666667"` is a one-minute tick. `driverStutterLength` is unrelated to
+model time -- it is the wall-clock delay (in milliseconds) the driver waits between
+automatic ticks.
 
 ### Global Run-Control Settings
 
@@ -354,7 +359,7 @@ Every module and store (anything based on the schema's `BioModuleType`) accepts:
 | `isBionetEnabled` | boolean | `false` | Reserved integration flag. |
 
 Each module may also carry an optional `<malfunction>`, one optional failure decider, and
-one optional `<normalStochasticFilter>` (see
+one optional `<normalStochasticFilter>` or `<relativeStochasticFilter>` (see
 [Reliability, Malfunctions, and Stochastic Noise](#reliability-malfunctions-and-stochastic-noise)).
 When present, these fault elements must appear **first**, in the order malfunction ->
 failure decider -> stochastic filter, before the module's producer/consumer children
@@ -532,10 +537,10 @@ power, produces food, dry waste, and water). The related stores carry extra attr
 
 | Module | Role | Required flow children | Special attributes |
 |--------|------|------------------------|--------------------|
-| `OGS` | Oxygen Generation System: electrolyzes water into O2 + H2 | `powerConsumer`, `potableWaterConsumer`, `O2Producer`, `H2Producer` | -- |
-| `VCCR` | Variable Configuration CO2 Removal | `powerConsumer`, `airConsumer`, `airProducer`, `CO2Producer` | `implementation` = `LINEAR` (default) or `DETAILED` |
+| `OGS` | Oxygen Generation System: electrolyzes water into O2 + H2 | `powerConsumer`, `potableWaterConsumer`, `O2Producer`, `H2Producer` | `implementation` = `LINEAR` (default) or `FARADAY` |
+| `VCCR` | Variable Configuration CO2 Removal | `powerConsumer`, `airConsumer`, `airProducer`, `CO2Producer` | `implementation` = `LINEAR` (default), `DETAILED`, or `LANGMUIR`; optional `ppCo2SetpointMmHg` for `LANGMUIR` |
 | `CDRS` | CO2 Removal System (grey-water variant) | `powerConsumer`, `greyWaterConsumer`, `greyWaterProducer`, `airConsumer`, `airProducer`, `CO2Producer` | -- |
-| `CRS` | CO2 Reduction (Sabatier): CO2 + H2 -> water + methane | `powerConsumer`, `CO2Consumer`, `H2Consumer`, `potableWaterProducer`, `methaneProducer` | -- |
+| `CRS` | CO2 Reduction (Sabatier): CO2 + H2 -> water + methane | `powerConsumer`, `CO2Consumer`, `H2Consumer`, `potableWaterProducer`, `methaneProducer` | `implementation` = `LINEAR` (default) or `CONVERSION` |
 | `Pyrolizer` | Cracks methane into H2 + dry waste | `powerConsumer`, `methaneConsumer`, `H2Producer`, `dryWasteProducer` | -- |
 
 ### Water Recovery Equipment
@@ -574,8 +579,16 @@ The `<framework>` group provides generic transfer modules that can move *any* re
 between stores/environments. `Accumulator`, `Injector`, `InfluentValve`, and
 `EffluentValve` each accept any combination of the consumer/producer children for any
 resource (power, the three waters, air, H2, N2, O2, CO2, light, biomass, food, dry waste).
-Accumulators and injectors are functionally equivalent and are typically used to dose a
-resource into an environment.
+Without `control="PCA"`, accumulators and injectors are equivalent. An O2 or N2
+source store with a positive `volume` (liters) enables pressure-driven flow, capped
+by the consumer's hourly `desiredFlowRates` and `maxFlowRates`. Omitted volume
+keeps hourly transfer behavior.
+
+On an `Injector` with `control="PCA"` and a volume-equipped source tank, the O2
+consumer's desired value is a partial-pressure setpoint in kPa; for N2 it is a
+total-pressure setpoint in kPa. `maxFlowRates` remains the mol/hour valve cap.
+Desired zero inhibits injection. This is a bounded, lumped regulator, not a vent
+or a validated hardware controller.
 
 ```xml
 <Injector moduleName="Oxygen_Injector">
@@ -583,6 +596,28 @@ resource into an environment.
   <O2Producer outputs="Crew_Cabin" desiredFlowRates="0.195" maxFlowRates="0.195"/>
 </Injector>
 ```
+
+### Opt-in Physical Laws
+
+Legacy `LINEAR` OGS, CRS and VCCR classes remain the defaults. `LANGMUIR` selects
+a two-state adsorption/desorption bed, not the legacy `DETAILED` VCCR stub.
+`FARADAY` ties electrolysis to energy and available water; `CONVERSION` uses the
+limiting stoichiometric reactant for Sabatier conversion.
+
+`Fan command="DAMPER"` interprets its power consumer's desired value as a
+dimensionless command in [0,1], with cubic power and linear volumetric flow.
+The power consumer's maximum is still watts. Omit `command` (or use `POWER`) to
+retain a watt-commanded fan. Both fan types use local pressure and temperature.
+
+`SimEnvironment thermal="ONE_NODE"` enables a lumped heat-capacity node and
+incoming-air mixing; omitted `thermal` (or `FROZEN`) keeps 23 degrees Celsius.
+In a one-node environment, the dehumidifier uses dewpoint and heat-exchanger
+capacity. The frozen-temperature path retains a concentration threshold, now
+0.02 water-vapor mole fraction rather than 0.52.
+
+See [changes and limitations](simulator_changes.md) and the standalone
+`configuration/test/ClosedLoopMassInit.xml` example. These approximate laws are
+not flight-qualified equipment models.
 
 ### Sensors and Actuators
 
@@ -657,24 +692,31 @@ can fail according to a probability distribution. Choose at most one decider; al
 <weibull2FailureDecider lambda="0.001" beta="1.5"/>
 ```
 
-**3. Stochastic (Gaussian) noise.** Add a `<normalStochasticFilter>` to a module to pass
-its outputs through a Gaussian filter, modeling sensor/process noise:
+**3. Stochastic noise.** Two filters exist. Default is none (`NoFilter`).
+
+`<relativeStochasticFilter>` is `N(x, σ·|x|)`: relative σ, one draw per flow, no
+rectification of negatives (up to 16 resamples; if none succeeds, return the input). `sigma="0.01"` is a
+1 % relative error. Zero input stays zero.
+
+```xml
+<relativeStochasticFilter sigma="0.01" isFilterEnabled="true"/>
+```
+
+`<normalStochasticFilter>` is an **absolute** Gaussian with negatives clamped to 0.
+That clamp creates mass when σ is comparable to the value. Prefer the relative filter
+for process noise.
 
 | Attribute | Type | Default | Meaning |
 |-----------|------|---------|---------|
-| `deviation` | double | (required) | Standard deviation of the Gaussian noise. |
-| `isFilterEnabled` | boolean | `true` | Toggle the filter without removing it. |
-
-```xml
-<normalStochasticFilter deviation="0.05"/>
-```
+| `deviation` | double | (required) | Absolute standard deviation (`normalStochasticFilter` only). |
+| `sigma` | double | (required) | Relative σ (`relativeStochasticFilter` only). |
+| `isFilterEnabled` | boolean | `true` for normal, `false` for relative | Set explicitly to `true` to enable relative noise. |
 
 The schema also defines a `stochasticIntensity` attribute on `<Globals>`
 (`HIGH_STOCH` / `MEDIUM_STOCH` / `LOW_STOCH` / `NONE_STOCH`, default `NONE_STOCH`) intended
 as a simulation-wide setting. In the current build, however, noise is applied per module
-through `<normalStochasticFilter>`; the global application path is not active, so prefer
-the per-module filter when you want noise to take effect. A purely deterministic run uses
-no filters (the default).
+through a child filter; the global application path is not active. A purely deterministic
+run uses no filters (the default).
 
 ### Complete Examples
 

@@ -17,8 +17,13 @@ import java.util.Iterator;
 
 public class SimEnvironment extends PassiveModule {
 
-    private final static float temperature = 23f;
-    private final static float idealGasConstant = 8.314f; // J K ^-1 mol -1
+    static final float INITIAL_TEMPERATURE_C = 23f;
+    static final float CV_J_PER_MOL_K = 20.8f;
+    static final float STRUCTURE_J_PER_LITER_K = 150f;
+    private static final float idealGasConstant = 8.314f; // kPa L / mol K
+    private float temperature = INITIAL_TEMPERATURE_C;
+    private boolean oneNodeThermal = false;
+    private float heatJoulesAccumulated = 0f;
     private final EnvironmentO2Store myO2Store = new EnvironmentO2Store(this);
     private final EnvironmentCO2Store myCO2Store = new EnvironmentCO2Store(this);
     private final EnvironmentNitrogenStore myNitrogenStore = new EnvironmentNitrogenStore(this);
@@ -99,8 +104,37 @@ public class SimEnvironment extends PassiveModule {
         super.reset();
         lightIntensity = 0f;
         currentVolume = initialVolume;
+        temperature = INITIAL_TEMPERATURE_C;
+        heatJoulesAccumulated = 0f;
         for (EnvironmentStore store : myEnvironmentStores)
             store.reset();
+    }
+
+    public void setOneNodeThermal(boolean enabled) {
+        oneNodeThermal = enabled;
+    }
+
+    public boolean isOneNodeThermal() {
+        return oneNodeThermal;
+    }
+
+    public void addHeatJoules(float joules) {
+        if (oneNodeThermal)
+            heatJoulesAccumulated += joules;
+    }
+
+    public void addHeatWatts(float watts) {
+        addHeatJoules(watts * getTickLength() * 3600f);
+    }
+
+    public void mixIncomingAir(float molesBefore, float incomingMoles, float incomingTemperatureC) {
+        if (!oneNodeThermal || incomingMoles <= 0f)
+            return;
+        float molesAfter = getTotalMoles();
+        if (molesAfter <= 0f)
+            return;
+        temperature = (molesBefore * temperature + incomingMoles * incomingTemperatureC)
+                / molesAfter;
     }
 
     /**
@@ -255,8 +289,25 @@ public class SimEnvironment extends PassiveModule {
         super.tick();
         for (EnvironmentStore store : myEnvironmentStores)
             store.tick();
+        applyHeat();
         performLeak(permanentLeakRate);
         calculateLightIntensity();
+    }
+
+    private void applyHeat() {
+        if (!oneNodeThermal) {
+            heatJoulesAccumulated = 0f;
+            return;
+        }
+        float n = getTotalMoles();
+        float capacity = n * CV_J_PER_MOL_K + currentVolume * STRUCTURE_J_PER_LITER_K;
+        if (capacity > 1f)
+            temperature += heatJoulesAccumulated / capacity;
+        heatJoulesAccumulated = 0f;
+        if (temperature < -80f)
+            temperature = -80f;
+        if (temperature > 80f)
+            temperature = 80f;
     }
 
     public void log() {

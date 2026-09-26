@@ -11,10 +11,17 @@ package com.traclabs.biosim.server.simulation.framework;
  */
 
 public class Injector extends ResourceMover {
+    private boolean pca;
 
     public Injector(int pID, String pName) {
         super(pID, pName);
     }
 
+    public void setPca(boolean pca) {
+        this.pca = pca;
+    }
 
+    public boolean isPca() {
+        return pca;
+    }
 }
